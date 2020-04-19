@@ -1,6 +1,7 @@
 using DocumentDB
 using Test
+using Base.Filesystem
 
 @testset "DocumentDB.jl" begin
-    # Write your own tests here.
+    include("TestBaseDocumentStore.jl")
 end
