@@ -1,0 +1,13 @@
+name = "DocumentDB"
+uuid = "a3ec6e4c-826e-11ea-37f8-a7158ada29ae"
+authors = ["Dario Balboni"]
+version = "0.1.0"
+
+[compat]
+julia = "1.3"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
