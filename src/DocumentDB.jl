@@ -6,7 +6,7 @@ BTree structures can also be built on top of these to act as real indexes over t
 module DocumentDB
 
 include("BaseDocumentStore.jl")
-using .BaseDocumentStore: DocID, DocPosition, DocLength, Document, DocDatabase, TableInfo, with_read_lock, with_write_lock, docdb_open, docdb_list_tables, docdb_table_create, docdb_table_insert, docdb_table_retrieve, docdb_close
-export DocID, DocPosition, DocLength, Document, DocDatabase, TableInfo, docdb_open, docdb_list_tables, docdb_table_create, docdb_table_insert, docdb_table_retrieve, docdb_close
+using .BaseDocumentStore: DocID, DocPosition, DocLength, Document, DocDatabase, TableInfo, with_read_lock, with_write_lock, docdb_open, docdb_list_tables, docdb_table_create, docdb_record_insert, docdb_record_retrieve, docdb_record_erase, docdb_close
+export DocID, DocPosition, DocLength, Document, DocDatabase, TableInfo, docdb_open, docdb_list_tables, docdb_table_create, docdb_record_insert, docdb_record_retrieve, docdb_record_erase, docdb_close
 
 end # module

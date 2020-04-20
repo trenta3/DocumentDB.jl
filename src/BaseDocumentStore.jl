@@ -7,6 +7,7 @@ const DocID = Int64
 const DocPosition = Int64
 const DocLength = Int64
 const Document = Vector{UInt8}
+const Nullable{T} = Union{Nothing, T}
 
 mutable struct DocDatabase
     root_path::AbstractString
@@ -23,51 +24,8 @@ struct TableInfo
     table_name::String
 end
 
-"""
-Internal help function used to acquire the read lock on a file.
-Can be used with a function accepting a file descriptor.
-"""
-function with_read_lock(f::Function, docdb::DocDatabase, subpath::String)
-    @ensure !docdb.closed error("DocDB was closed before the request could be completed.")
-    if !(subpath in keys(docdb.read_locks))
-        lock(docdb.global_lock) do
-            if !(subpath in keys(docdb.read_locks))
-                docdb.read_locks[subpath] = ReentrantLock()
-            end
-        end
-    end
-    # Now we need to acquire the read lock, open the file stream (maybe) and return
-    # it to the function f.
-    return lock(docdb.read_locks[subpath]) do
-        if !(subpath in keys(docdb.file_streams))
-            docdb.file_streams[subpath] = open(joinpath(docdb.root_path, subpath), "w+")
-        end
-        return f(docdb.file_streams[subpath])
-    end
-end
+include("RWUtils.jl")
 
-"""
-Internal help function used to acquire the write lock on a file stream (after acquiring the read lock).
-Can be used with a function accepting a file descriptor.
-"""
-function with_write_lock(f::Function, docdb::DocDatabase, subpath::String)
-    @ensure !docdb.closed error("DocDB was closed before the request could be completed.")
-    if !(subpath in keys(docdb.write_locks))
-        lock(docdb.global_lock) do
-            if !(subpath in keys(docdb.write_locks))
-                docdb.write_locks[subpath] = ReentrantLock()
-            end
-        end
-    end
-    # Now that we have created it we need to first acquire the read lock to stop reads
-    # then to acquire the write lock, then to execute the function f.
-    return with_read_lock(docdb, subpath) do fio
-        return lock(docdb.write_locks[subpath]) do
-            return f(fio)
-        end
-    end
-end
-    
 """
 Opens a folder (or creates it if it does not exist) and starts a document database in it.
 """
@@ -101,39 +59,48 @@ function docdb_table_create(docdb::DocDatabase, table_name::String; exists_ok::B
     else
         touch(table_path)
         touch(index_path)
+        # Write our custom signature at start of the table
+        _table_write(docdb, table_name, Vector{UInt8}(transcode(UInt8, "DOCDBTBL")), DocPosition(0))
     end
     return true
 end
 
-function docdb_table_insert(docdb::DocDatabase, table_name::String, document::Document) :: DocID
+"""
+Insert a record in the storage
+"""
+function docdb_record_insert(docdb::DocDatabase, table_name::String, document::Document) :: DocID
     @ensure !docdb.will_close error("DocDB is closing. No more requests are accepted")
-    return with_write_lock(docdb, table_name * ".index") do index_io
-        return with_write_lock(docdb, table_name * ".table") do table_io
-            seekend(table_io)
-            curpos = DocPosition(position(table_io))
-            doclen = DocLength(size(document)[1])
-            written = write(table_io, document)
-            @ensure (written == doclen) error("In writing to table $(table_name) a document was not written entirely.")
-            # After writing the document, we also need to write its place in the index
-            seekend(index_io)
-            indexpos = DocID(position(index_io) ÷ (DocPosition.size + DocLength.size))
-            @ensure (write(index_io, curpos) + write(index_io, doclen) == DocPosition.size + DocLength.size) error("In writing to index $(table_name) a position was not written fully.")
-            return indexpos
-        end
-    end
+    (doc_pos, doc_len) = _table_write(docdb, table_name, document)
+    @ensure (doc_len == size(document)[1]) error("In writing to table $(table_name) a document was not written entirely.")
+    docid = _index_write(docdb, table_name, doc_pos, doc_len)
+    return docid
 end
 
-function docdb_table_retrieve(docdb::DocDatabase, table_name::String, docid::DocID) :: Document
+"""
+Wipe a record from storage, deleting it also from the index.
+
+> This operation is destructive. Be careful!
+"""
+function docdb_record_erase(docdb::DocDatabase, table_name::String, docid::DocID) :: Bool
     @ensure !docdb.will_close error("DocDB is closing. No more requests are accepted")
-    return with_read_lock(docdb, table_name * ".index") do index_io
-        return with_read_lock(docdb, table_name * ".table") do table_io
-            seek(index_io, docid * (DocPosition.size + DocLength.size))
-            document_start = read(index_io, DocPosition)
-            document_length = read(index_io, DocLength)
-            seek(table_io, document_start)
-            return read(table_io, document_length; all=true)
-        end
-    end
+    index = _index_read(docdb, table_name, docid)
+    @test (index == nothing) return false
+    (docpos, doclen) = index
+    _table_write(docdb, table_name, repeat(UInt8[0], doclen), docpos)
+    _index_write(docdb, table_name, 0, 0, docid)
+    return true
+end
+
+"""
+Try to retrieve a document from the storage given its ID.
+It returns nothing if fails.
+"""
+function docdb_record_retrieve(docdb::DocDatabase, table_name::String, docid::DocID) :: Nullable{Document}
+    @ensure !docdb.will_close error("DocDB is closing. No more requests are accepted")
+    index = _index_read(docdb, table_name, docid)
+    @test (index == nothing) return nothing
+    (docpos, doclen) = index
+    return _table_read(docdb, table_name, docpos, doclen)
 end
 
 """

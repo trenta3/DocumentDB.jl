@@ -16,15 +16,20 @@
     @test docdb_list_tables(db)[1] == TableInfo("main")
 
     document1 = Vector{UInt8}(transcode(UInt8, "A Simple string with some unicode: α → ∞."))
-    docid1 = docdb_table_insert(db, "main", document1)
+    docid1 = docdb_record_insert(db, "main", document1)
     @test docid1 == DocID(0)
     document2 = Vector{UInt8}(transcode(UInt8, "This time: ∫ α^3 + f(β) dβ"))
-    docid2 = docdb_table_insert(db, "main", document2)
+    docid2 = docdb_record_insert(db, "main", document2)
     @test docid2 == DocID(1)
-    @test docdb_table_insert(db, "main", document1) == DocID(2)
-    @test docdb_table_retrieve(db, "main", DocID(0)) == document1
-    @test docdb_table_retrieve(db, "main", DocID(1)) == document2
-    @test docdb_table_retrieve(db, "main", DocID(2)) == document1
+    @test docdb_record_insert(db, "main", document1) == DocID(2)
+    @test docdb_record_retrieve(db, "main", DocID(0)) == document1
+    @test docdb_record_retrieve(db, "main", DocID(1)) == document2
+    @test docdb_record_retrieve(db, "main", DocID(2)) == document1
+
+    @test docdb_record_erase(db, "main", DocID(0))
+    @test docdb_record_erase(db, "main", DocID(0)) == false
+    @test docdb_record_retrieve(db, "main", DocID(0)) == nothing
+    @test docdb_record_retrieve(db, "main", DocID(1)) == document2
 
     @test_nowarn docdb_close(db)
 end
